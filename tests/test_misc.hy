@@ -172,7 +172,9 @@
   ; Test that an early error is raised properly.
   (with [e (pytest.raises sqlite3.OperationalError)]
     (test [:database "/invalid_directory_name/invalid_file_name"]))
-  (assert (= e.value.args #("unable to open database file")))
+  (assert (in (get e.value.args 0) #(
+    "unable to open database file"
+    "Could not open database")))
 
   ; Test the parameter `row-factory`.
   (test []
