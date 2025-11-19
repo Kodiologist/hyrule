@@ -5,7 +5,7 @@
   sqlite3
   pytest
   typing [List Dict]
-  hyrule [constantly dec inc import-path parse-args sign xor sqlite-db])
+  hyrule [constantly dec inc import-path parse-args sign xor sqlite-db HyruleSQLiteConnection])
 
 
 (defn test-constantly []
@@ -199,3 +199,49 @@
       (.execute db "insert into B values (5)")))
   (test [:foreign-keys False]
     (.execute db "insert into B values (5)")))
+
+
+(defn test-sqlite-db-insert []
+
+  (defn stmt [table items]
+    (get
+      (HyruleSQLiteConnection.get-insert-stmt table items "insert" None)
+      0))
+  (assert (=
+    (stmt "MyTable" (dict :foo 1 :bar 2))
+    #[[insert into "MyTable" ("foo", "bar") values (?, ?)]]))
+  (assert (=
+    (stmt "My \"Cool\" Table" {"table" 1 "3); drop table Accounts; --"  2})
+    #[[insert into "My ""Cool"" Table" ("table", "3); drop table Accounts; --") values (?, ?)]]))
+  (assert (=
+    (stmt "My Schema.My.Table.Name" {"a" 1})
+    #[[insert into "My Schema"."My.Table.Name" ("a") values (?)]]))
+
+  (with [db (sqlite-db :row-factory None)]
+
+    (.execute db "create table A(n integer primary key, m integer) strict")
+    (defn assert-A-is [rvalue]
+      (assert (=
+        (dict (.execute db "select * from A order by n"))
+        rvalue)))
+
+    (.insert db "A" (dict :n 1 :m 2))
+    (assert-A-is {1 2})
+
+    (.insertmany db "A" [(dict :n 2 :m 2) (dict :n 3 :m 5)])
+    (assert-A-is {1 2  2 2  3 5})
+
+    (.insert db "A" (dict :n 1 :m 10)
+      :verb "replace")
+    (assert-A-is {1 10  2 2  3 5})
+    (.insert db "A" (dict :n 1 :m 20)
+      :verb "insert or ignore")
+    (assert-A-is {1 10  2 2  3 5})
+
+    (setv [[x]] (.insert db
+      :item (dict :n 7 :m 8)
+      :fmt "insert into main.A ({}) values ({}) returning n + m"))
+    (assert-A-is {1 10  2 2  3 5  7 8})
+    (assert (= x 15)))
+
+  )

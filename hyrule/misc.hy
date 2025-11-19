@@ -281,7 +281,7 @@
 
   (try
 
-    (setv db (hy.I.sqlite3.connect
+    (setv db (HyruleSQLiteConnection
       :database database
       :isolation-level isolation-level
       #** kwargs))
@@ -293,3 +293,39 @@
     (finally
       (when (is-not db None)
         (.close db)))))
+
+(defclass HyruleSQLiteConnection [sqlite3.Connection]
+
+   (defn [classmethod] q [cls x]
+     (+ "\"" (.replace (str x) "\"" "\"\"") "\""))
+
+   (defn insert [self [table None] [item None] [verb "insert"] [fmt None]]
+     (when (not item)
+       (raise (ValueError "`item` is required")))
+     (.insertmany self table [item] verb fmt))
+
+   (defn insertmany [self [table None] [items None] [verb "insert"] [fmt None]]
+     (when (not items)
+       (return)) ; XKodi
+     (setv [stmt ks] (.get-insert-stmt self table (get items 0) verb fmt))
+     (.executemany self
+       stmt
+       (gfor
+         item items
+         (lfor k ks (get item k)))))
+
+   (defn [classmethod] get-insert-stmt [cls table item verb fmt]
+     (when (not fmt)
+       (when (not table)
+         (raise (ValueError "`table` is required when `fmt` is not provided")))
+       (setv fmt (.format "{} into {} ({{}}) values ({{}})"
+         verb
+         (if (in "." table)
+           (.join "." (map cls.q (.split table "." :maxsplit 1)))
+           (cls.q table)))))
+     (setv ks (list (.keys item)))
+     #(
+       (.format fmt
+         (.join ", " (map cls.q ks))
+         (.join ", " (* ["?"] (len ks))))
+       ks)))
