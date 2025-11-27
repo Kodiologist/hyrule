@@ -1,7 +1,9 @@
+(require
+  hyrule [sqlexec])
 (import
   sqlite3
   pytest
-  hyrule [sqlite-db])
+  hyrule [sqlite-db sql-interpolate])
 
 
 (defn test-sqlite-db [tmp-path]
@@ -58,3 +60,44 @@
       (.execute db "insert into B values (5)")))
   (test [:foreign-keys False]
     (.execute db "insert into B values (5)")))
+
+
+(defn test-sql-interpolate []
+
+  (assert (=
+    (sql-interpolate
+      'f"update T set {v1 :=}, v2 = {(+ v1 1)} where {v2 :=} and {v4 :=}")
+    #(
+      #[[update T set "v1" = ?, v2 = ? where "v2" = ? and "v4" = ?]]
+      #('v1 '(+ v1 1) 'v2 'v4))))
+  (assert (=
+    (sql-interpolate
+      'f"insert into T {... :values}"
+      '[:foo 1 :bar 2 :abso💯lutely "great job"])
+    #(
+      #[[insert into T ("foo", "bar", "abso💯lutely") values (?, ?, ?)]]
+      #('1 '2 '"great job"))))
+
+  (with [db (sqlite-db :row-factory None)]
+
+    ; Use a weird table name and weird column names to test escaping.
+    (.execute db (.join " " [#[[create table "My ""Cool"" Table"(]]
+      #[["and" integer primary key,]]
+      #[["select" integer,]]
+      #[["3); drop table Accounts; --" text)]]]))
+
+    ; Test `{... :values}`.
+    (sqlexec db
+      #[f[insert into "My ""Cool"" Table" {... :values}]f]
+      :and 15 :select 16)
+    (assert (=
+      (list (.execute db #[[select "and", "select" from "My ""Cool"" Table"]]))
+      [#(15 16)]))
+
+    ; Test `{FORM}` and `{FORM :=}`.
+    (setv select 16)
+    (sqlexec db
+      #[f[update "My ""Cool"" Table" set "3); drop table Accounts; --" = {"where"} where {select :=}]f])
+    (assert (=
+      (list (.execute db #[[select * from "My ""Cool"" Table"]]))
+      [#(15 16 "where")]))))

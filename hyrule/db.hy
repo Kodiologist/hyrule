@@ -1,6 +1,7 @@
 (import
   contextlib [contextmanager]
-  sqlite3)
+  sqlite3
+  hyrule.collections [by2s])
 
 
 (defclass AttributeRow [sqlite3.Row]
@@ -61,3 +62,45 @@
     (finally
       (when (is-not db None)
         (.close db)))))
+
+
+(defn sqlq [x]
+  "Quote ``x`` as a SQL identifier. ``x`` is stringified and then
+  surrounded by double quotes, with any internal double quotes
+  duplicated to escape them."
+  (+ "\"" (.replace (str x) "\"" "\"\"") "\""))
+
+
+(defn sql-interpolate [fstring [rest None]]
+  (assert (isinstance fstring hy.models.FString))
+  (setv params [])
+  (setv sql (.join "" (gfor
+    part fstring
+    (cond
+      (isinstance part hy.models.String)
+        part
+      ; Otherwise, `part` should be an `FComponent`.
+      (is-not part.conversion None)
+        (raise (ValueError "conversion specifier not allowed"))
+      (= (len part) 1) (do
+        (.append params (get part 0))
+        "?")
+      (and (= (len part) 2) (= (get part 1) '"=")) (do
+        (.append params (get part 0))
+        (+ (sqlq (get part 0)) " = ?"))
+      (and (= (len part) 2) (= (get part 1) '"values")) (do
+        (assert (= (get part 0) '...))
+        (setv [keys values] (zip #* (by2s rest)))
+        (.extend params values)
+        (.format "({}) values ({})"
+          (.join ", " (gfor  k keys  (sqlq k.name)))
+          (.join ", " (* ["?"] (len values)))))
+      True
+         (raise ValueError)))))
+  #(sql (tuple params)))
+
+(defmacro sqlexec [db arg1 #* rest]
+  (if (= arg1 ':many)
+    (setv [f fstring #* rest] ['executemany #* rest])
+    (setv [f fstring] ['execute arg1]))
+  `((. ~db ~f) ~@(sql-interpolate fstring rest)))
